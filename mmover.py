@@ -130,7 +130,7 @@ def move_mouse_at_intervals():
             try:
                 pyautogui.press('shift')  # Simulate a harmless keypress
             except Exception as ex:
-                print(f"Невозможно симулировать действие: {ex}")
+                print(f"Unable to simulate input: {ex}")
             last_keepalive_time = current_time
 
         stop_event.wait(0.5)  # Check every 0.5 seconds
@@ -193,7 +193,7 @@ class ScreenProtector:
         self.password_form_hide_at = 0.0
         self.password_required = self.password_is_configured()
         self.password_var = tk.StringVar()
-        self.message_var = tk.StringVar(value="Введите пароль для разблокировки")
+        self.message_var = tk.StringVar(value="Enter password to unlock")
 
         if self.password_required:
             self.create_password_form()
@@ -264,7 +264,7 @@ class ScreenProtector:
         self.password_panel.place(relx=0.5, rely=0.5, anchor="center")
         self.password_form_visible = True
         self.password_var.set("")
-        self.message_var.set("Введите пароль для разблокировки")
+        self.message_var.set("Enter password to unlock")
         self.overlay.configure(cursor="")
         self.extend_password_form_timeout()
         self.overlay.after(50, self.password_entry.focus_force)
@@ -276,7 +276,7 @@ class ScreenProtector:
         self.password_panel.place_forget()
         self.password_form_visible = False
         self.password_var.set("")
-        self.message_var.set("Введите пароль для разблокировки")
+        self.message_var.set("Enter password to unlock")
         self.overlay.configure(cursor="none")
 
     def show(self):
@@ -301,7 +301,7 @@ class ScreenProtector:
             salt = base64.b64decode(config["password_salt"], validate=True)
             actual_digest = password_digest(self.password_var.get(), salt)
         except (TypeError, ValueError):
-            self.message_var.set("Ошибка конфигурации пароля")
+            self.message_var.set("Password configuration error")
             return "break"
 
         if hmac.compare_digest(actual_digest, config["password_hash"]):
@@ -311,7 +311,7 @@ class ScreenProtector:
             self.hide()
         else:
             self.password_var.set("")
-            self.message_var.set("Неверный пароль. Повторите попытку")
+            self.message_var.set("Incorrect password. Try again")
             self.extend_password_form_timeout()
             self.password_entry.focus_force()
         return "break"
