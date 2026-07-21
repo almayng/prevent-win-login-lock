@@ -1,20 +1,20 @@
 # Auto Mouse Mover
 
-Утилита для Windows, которая предотвращает блокировку экрана и засыпание системы при длительном простое. Вместо постоянного движения курсора (что может приводить к выгоранию пикселей на OLED/IPS) программа:
+A Windows utility that prevents screen lock and system sleep during long idle periods. Instead of constantly moving the cursor (which can cause pixel burn-in on OLED/IPS displays), the program:
 
-- периодически отправляет безвредный сигнал активности (нажатие `Shift`);
-- при длительном отсутствии действий пользователя закрывает все мониторы чёрным полноэкранным слоем;
-- опционально требует пароль для снятия защиты экрана.
+- periodically sends a harmless activity signal (pressing `Shift`);
+- after prolonged user inactivity, covers all monitors with a black fullscreen overlay;
+- optionally requires a password to dismiss the screen protection.
 
-После запуска программа сворачивается в системный трей. Для выхода используйте пункт **Exit** в меню иконки.
+After launch, the program minimizes to the system tray. To exit, use the **Exit** item in the tray icon menu.
 
-## Требования
+## Requirements
 
 - Windows 10/11
 - Python 3.11+
-- Зависимости из виртуального окружения проекта
+- Dependencies from the project's virtual environment
 
-## Установка
+## Installation
 
 ```powershell
 cd c:\work\Pycharm\auto-mouse-mover
@@ -22,29 +22,29 @@ python -m venv venv
 venv\Scripts\pip install pyautogui pynput pystray pillow psutil
 ```
 
-> **Примечание.** Для определения блокировки экрана Windows можно дополнительно установить `pywin32`. Без него программа продолжит работать, но проверка «экран заблокирован системой» будет недоступна.
+> **Note.** To detect Windows screen lock, you can optionally install `pywin32`. Without it, the program will still run, but the "screen locked by the system" check will be unavailable.
 
-## Запуск
+## Running
 
 ```powershell
 venv\Scripts\python.exe mmover.py
 ```
 
-При первом запуске рядом со скриптом автоматически создаётся файл `config.json`, если его ещё нет.
+On first run, a `config.json` file is automatically created next to the script if it does not already exist.
 
-## Как это работает
+## How It Works
 
-1. Программа отслеживает реальную активность мыши и клавиатуры.
-2. Если пользователь неактивен дольше `idle_time_threshold` секунд, отправляется keep-alive сигнал (`Shift`), чтобы система не ушла в блокировку/сон.
-3. Если простой длится дольше `display_protection_threshold` секунд, поверх всех мониторов показывается чёрный экран — это защищает панель от статичного изображения.
-4. Любое движение мыши или нажатие клавиши снимает чёрный экран **только если парольная защита отключена**.
-5. Если пароль включён, для разблокировки нужно ввести пароль в форме на чёрном экране и нажать Enter.
+1. The program tracks real mouse and keyboard activity.
+2. If the user is inactive for longer than `idle_time_threshold` seconds, a keep-alive signal (`Shift`) is sent so the system does not lock or sleep.
+3. If idle time exceeds `display_protection_threshold` seconds, a black screen is shown over all monitors — this protects the panel from static images.
+4. Any mouse movement or key press dismisses the black screen **only if password protection is disabled**.
+5. If a password is enabled, you must enter it in the form on the black screen and press Enter to unlock.
 
-## Конфигурация
+## Configuration
 
-Все настройки хранятся в файле `config.json` рядом с `mmover.py`.
+All settings are stored in the `config.json` file next to `mmover.py`.
 
-### Пример конфигурации
+### Example Configuration
 
 ```json
 {
@@ -57,18 +57,18 @@ venv\Scripts\python.exe mmover.py
 }
 ```
 
-### Параметры
+### Parameters
 
-| Параметр | Тип | По умолчанию | Описание |
+| Parameter | Type | Default | Description |
 |---|---|---:|---|
-| `idle_time_threshold` | число (сек) | `20` | Через сколько секунд простоя отправлять keep-alive сигнал, чтобы система не заблокировалась. |
-| `display_protection_threshold` | число (сек) | `60` | Через сколько секунд простоя показывать чёрный экран на всех мониторах. Должен быть **не меньше** `idle_time_threshold`. |
-| `password_protection_enabled` | `true` / `false` | `false` | Включить или отключить требование пароля для снятия чёрного экрана. |
-| `password_prompt_timeout` | число (сек) | `15` | Сколько секунд показывать поле ввода пароля после попытки разблокировки. По истечении таймаута экран снова становится полностью чёрным. |
-| `password_salt` | строка | `""` | Служебное поле: соль для проверки пароля. Заполняется автоматически при установке пароля. **Не редактируйте вручную.** |
-| `password_hash` | строка | `""` | Служебное поле: хеш пароля (PBKDF2-SHA256). Заполняется автоматически. **Не редактируйте вручную.** |
+| `idle_time_threshold` | number (sec) | `20` | How many seconds of idle time before sending a keep-alive signal to prevent system lock. |
+| `display_protection_threshold` | number (sec) | `60` | How many seconds of idle time before showing a black screen on all monitors. Must be **greater than or equal to** `idle_time_threshold`. |
+| `password_protection_enabled` | `true` / `false` | `false` | Enable or disable password requirement to dismiss the black screen. |
+| `password_prompt_timeout` | number (sec) | `15` | How many seconds to show the password input field after an unlock attempt. When the timeout expires, the screen becomes fully black again. |
+| `password_salt` | string | `""` | Service field: salt for password verification. Filled automatically when setting a password. **Do not edit manually.** |
+| `password_hash` | string | `""` | Service field: password hash (PBKDF2-SHA256). Filled automatically. **Do not edit manually.** |
 
-### Рекомендуемые значения
+### Recommended Values
 
 ```json
 {
@@ -77,10 +77,10 @@ venv\Scripts\python.exe mmover.py
 }
 ```
 
-- `idle_time_threshold` — ставьте чуть меньше системного таймаута блокировки Windows.
-- `display_protection_threshold` — чем больше значение, тем реже появляется чёрный экран, но дольше на мониторе может оставаться статичная картинка.
+- `idle_time_threshold` — set it slightly below the Windows screen lock timeout.
+- `display_protection_threshold` — the higher the value, the less often the black screen appears, but static images may remain on the monitor longer.
 
-Пример для быстрой проверки (только для отладки):
+Example for quick testing (debugging only):
 
 ```json
 {
@@ -89,35 +89,35 @@ venv\Scripts\python.exe mmover.py
 }
 ```
 
-После изменения `config.json` перезапустите программу.
+Restart the program after changing `config.json`.
 
-## Парольная защита
+## Password Protection
 
-Пароль защищает снятие **чёрного экрана программы**, а не блокировку Windows. Это локальная защита от случайного или намеренного снятия оверлея без ввода пароля.
+The password protects dismissal of the **program's black screen**, not Windows lock. This is local protection against accidental or intentional removal of the overlay without entering a password.
 
-Пароль **не хранится в открытом виде**. В конфиге сохраняется только криптографический хеш (PBKDF2-SHA256 с солью).
+The password is **not stored in plain text**. Only a cryptographic hash (PBKDF2-SHA256 with salt) is saved in the config.
 
-### Установить или сменить пароль
+### Set or Change Password
 
 ```powershell
 venv\Scripts\python.exe mmover.py --set-password
 ```
 
-Команда запросит пароль дважды и автоматически:
+The command will prompt for the password twice and automatically:
 
-- сгенерирует соль;
-- сохранит хеш в `config.json`;
-- включит `"password_protection_enabled": true`.
+- generate a salt;
+- save the hash in `config.json`;
+- enable `"password_protection_enabled": true`.
 
-### Отключить парольную защиту
+### Disable Password Protection
 
-**Способ 1 — через команду:**
+**Method 1 — via command:**
 
 ```powershell
 venv\Scripts\python.exe mmover.py --disable-password
 ```
 
-**Способ 2 — через конфиг:**
+**Method 2 — via config:**
 
 ```json
 {
@@ -125,48 +125,48 @@ venv\Scripts\python.exe mmover.py --disable-password
 }
 ```
 
-Поля `password_salt` и `password_hash` можно оставить — они просто не будут использоваться, пока защита выключена.
+The `password_salt` and `password_hash` fields can be left as-is — they simply won't be used while protection is disabled.
 
-### Разблокировка с паролем
+### Unlocking with Password
 
-1. Дождитесь появления чёрного экрана (без поля ввода).
-2. Двиньте мышь или нажмите любую клавишу — это считается попыткой разблокировки.
-3. Появится поле ввода пароля. Введите пароль и нажмите **Enter**.
-4. Если пароль не введён в течение `password_prompt_timeout` секунд, поле снова скрывается, а экран остаётся чёрным.
+1. Wait for the black screen to appear (without an input field).
+2. Move the mouse or press any key — this counts as an unlock attempt.
+3. A password input field will appear. Enter the password and press **Enter**.
+4. If the password is not entered within `password_prompt_timeout` seconds, the field is hidden again and the screen remains black.
 
-При неверном пароле экран останется закрытым, но поле ввода останется доступным до истечения таймаута.
+With an incorrect password, the screen stays covered, but the input field remains available until the timeout expires.
 
-## Управление
+## Controls
 
-| Действие | Как выполнить |
+| Action | How to Perform |
 |---|---|
-| Запуск | `venv\Scripts\python.exe mmover.py` |
-| Выход | ПКМ по иконке в трее → **Exit** |
-| Снять чёрный экран без пароля | Двинуть мышь или нажать любую клавишу |
-| Снять чёрный экран с паролем | Двинуть мышь или нажать клавишу → ввести пароль → Enter |
+| Start | `venv\Scripts\python.exe mmover.py` |
+| Exit | Right-click tray icon → **Exit** |
+| Dismiss black screen without password | Move mouse or press any key |
+| Dismiss black screen with password | Move mouse or press key → enter password → Enter |
 
-## Ограничения
+## Limitations
 
-- Защита паролем не заменяет системную блокировку Windows (`Win + L`). Процесс можно завершить из диспетчера задач той же учётной записи.
-- Keep-alive сигнал (`Shift`) не должен мешать работе, но в редких случаях может попасть в активное окно, если оно в фокусе.
-- Чёрный экран покрывает все мониторы, включая расположенные слева или выше основного.
+- Password protection does not replace Windows system lock (`Win + L`). The process can be terminated from Task Manager under the same user account.
+- The keep-alive signal (`Shift`) should not interfere with work, but in rare cases it may reach the active window if it has focus.
+- The black screen covers all monitors, including those positioned to the left or above the primary display.
 
-## Проверка работоспособности
+## Verification
 
-В проекте есть вспомогательные скрипты для автоматической проверки:
+The project includes helper scripts for automated testing:
 
 ```powershell
 venv\Scripts\python.exe test_mmover.py
 venv\Scripts\python.exe smoke_test_mmover.py
 ```
 
-## Структура проекта
+## Project Structure
 
 ```
 auto-mouse-mover/
-├── mmover.py              # основной скрипт
-├── config.json            # настройки
-├── test_mmover.py         # автотесты логики
-├── smoke_test_mmover.py   # короткий живой smoke-тест
-└── venv/                  # виртуальное окружение Python
+├── mmover.py              # main script
+├── config.json            # settings
+├── test_mmover.py         # logic unit tests
+├── smoke_test_mmover.py   # short live smoke test
+└── venv/                  # Python virtual environment
 ```
