@@ -19,7 +19,7 @@ After launch, the program minimizes to the system tray. To exit, use the **Exit*
 ```powershell
 cd c:\work\Pycharm\auto-mouse-mover
 python -m venv venv
-venv\Scripts\pip install pyautogui pynput pystray pillow psutil
+venv\Scripts\pip install pyautogui pynput pystray pillow psutil pycaw
 ```
 
 > **Note.** To detect Windows screen lock, you can optionally install `pywin32`. Without it, the program will still run, but the "screen locked by the system" check will be unavailable.
@@ -36,9 +36,10 @@ On first run, a `config.json` file is automatically created next to the script i
 
 1. The program tracks real mouse and keyboard activity.
 2. If the user is inactive for longer than `idle_time_threshold` seconds, a keep-alive signal (`Shift`) is sent so the system does not lock or sleep.
-3. If idle time exceeds `display_protection_threshold` seconds, a black screen is shown over all monitors — this protects the panel from static images.
-4. Any mouse movement or key press dismisses the black screen **only if password protection is disabled**.
-5. If a password is enabled, you must enter it in the form on the black screen and press Enter to unlock.
+3. While an active, unmuted Windows audio session is detected (for example, a video or an online meeting), the black screen is not shown.
+4. If idle time exceeds `display_protection_threshold` seconds and no media is playing, a black screen is shown over all monitors — this protects the panel from static images.
+5. Any mouse movement or key press dismisses the black screen **only if password protection is disabled**.
+6. If a password is enabled, you must enter it in the form on the black screen and press Enter to unlock.
 
 ## Configuration
 
@@ -50,6 +51,7 @@ All settings are stored in the `config.json` file next to `mmover.py`.
 {
   "idle_time_threshold": 20,
   "display_protection_threshold": 60,
+  "media_detection_enabled": true,
   "password_protection_enabled": false,
   "password_prompt_timeout": 15,
   "password_salt": "",
@@ -63,6 +65,7 @@ All settings are stored in the `config.json` file next to `mmover.py`.
 |---|---|---:|---|
 | `idle_time_threshold` | number (sec) | `20` | How many seconds of idle time before sending a keep-alive signal to prevent system lock. |
 | `display_protection_threshold` | number (sec) | `60` | How many seconds of idle time before showing a black screen on all monitors. Must be **greater than or equal to** `idle_time_threshold`. |
+| `media_detection_enabled` | `true` / `false` | `true` | Do not show the black screen while Windows has an active, unmuted audio session. Requires `pycaw`. |
 | `password_protection_enabled` | `true` / `false` | `false` | Enable or disable password requirement to dismiss the black screen. |
 | `password_prompt_timeout` | number (sec) | `15` | How many seconds to show the password input field after an unlock attempt. When the timeout expires, the screen becomes fully black again. |
 | `password_salt` | string | `""` | Service field: salt for password verification. Filled automatically when setting a password. **Do not edit manually.** |

@@ -20,6 +20,7 @@ CONFIG_PATH = Path(__file__).with_name("config.json")
 DEFAULT_CONFIG = {
     "idle_time_threshold": 20,
     "display_protection_threshold": 60,
+    "media_detection_enabled": True,
     "password_protection_enabled": False,
     "password_prompt_timeout": 15,
     "password_salt": "",
@@ -97,6 +98,39 @@ config = DEFAULT_CONFIG.copy()
 idle_time_threshold = config["idle_time_threshold"]
 display_protection_threshold = config["display_protection_threshold"]
 password_prompt_timeout = config["password_prompt_timeout"]
+media_detection_enabled = config["media_detection_enabled"]
+_media_check_time = 0.0
+_media_playing = False
+
+def is_media_playing():
+    """Return whether Windows has an active, unmuted audio session."""
+    global _media_check_time, _media_playing
+
+    if not media_detection_enabled or not psutil.WINDOWS:
+        return False
+
+    current_time = time.monotonic()
+    if current_time - _media_check_time < 2.0:
+        return _media_playing
+
+    _media_check_time = current_time
+    try:
+        from pycaw.pycaw import AudioUtilities
+
+        # AudioSessionStateActive has the numeric value 1. Avoid importing the
+        # enum because its location differs between pycaw versions.
+        _media_playing = any(
+            session.State == 1 and not session.SimpleAudioVolume.GetMute()
+            for session in AudioUtilities.GetAllSessions()
+        )
+    except (ImportError, OSError):
+        _media_playing = False
+    except Exception as error:
+        # Audio sessions may disappear while they are being enumerated.
+        print(f"Unable to check media playback: {error}")
+        _media_playing = False
+
+    return _media_playing
 
 def is_screen_locked():
     """Check if the screen is locked (Windows/Linux)."""
@@ -342,6 +376,7 @@ class ScreenProtector:
         elif (
             not self.visible
             and time.monotonic() - last_user_activity_time >= display_protection_threshold
+            and not is_media_playing()
         ):
             self.show()
 
@@ -368,6 +403,7 @@ if __name__ == "__main__":
     idle_time_threshold = float(config["idle_time_threshold"])
     display_protection_threshold = float(config["display_protection_threshold"])
     password_prompt_timeout = float(config["password_prompt_timeout"])
+    media_detection_enabled = bool(config["media_detection_enabled"])
     setup_tray()
 
     # Start mouse listener
