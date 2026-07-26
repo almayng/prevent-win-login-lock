@@ -4,6 +4,7 @@ import time
 import tkinter as tk
 import argparse
 import base64
+import ctypes
 import getpass
 import hashlib
 import hmac
@@ -15,6 +16,11 @@ from pynput.mouse import Listener as MouseListener
 from pynput.keyboard import Listener as KeyboardListener
 from pystray import Icon, Menu, MenuItem
 from PIL import Image, ImageDraw
+
+# Windows: reset idle timers so the session does not lock or sleep.
+ES_CONTINUOUS = 0x80000000
+ES_SYSTEM_REQUIRED = 0x00000001
+ES_DISPLAY_REQUIRED = 0x00000002
 
 CONFIG_PATH = Path(__file__).with_name("config.json")
 DEFAULT_CONFIG = {
@@ -41,7 +47,19 @@ def load_config():
     except (OSError, json.JSONDecodeError) as error:
         raise RuntimeError(f"Cannot read configuration file {CONFIG_PATH}: {error}") from error
 
-    return {**DEFAULT_CONFIG, **config}
+    merged = {**DEFAULT_CONFIG, **config}
+    idle = float(merged["idle_time_threshold"])
+    display = float(merged["display_protection_threshold"])
+    if display < idle:
+        # Keep-alive must start before the black overlay; otherwise Windows can
+        # lock while the protector is already covering the screen.
+        print(
+            "Warning: display_protection_threshold "
+            f"({display}) < idle_time_threshold ({idle}). "
+            f"Raising display_protection_threshold to {idle}."
+        )
+        merged["display_protection_threshold"] = idle
+    return merged
 
 def save_config(config):
     """Save configuration with restrictive permissions where supported."""
@@ -147,8 +165,28 @@ def is_screen_locked():
     except Exception:
         return False
 
+def prevent_system_idle():
+    """Tell Windows the session is still in use (display + system)."""
+    if not psutil.WINDOWS:
+        return
+    try:
+        ctypes.windll.kernel32.SetThreadExecutionState(
+            ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED
+        )
+    except Exception as ex:
+        print(f"Unable to set execution state: {ex}")
+
+
+def jiggle_mouse():
+    """Tiny cursor nudge that resets the Windows last-input idle timer."""
+    x, y = pyautogui.position()
+    # One-pixel move and back: enough for GetLastInputInfo, invisible in practice.
+    pyautogui.moveTo(x + 1, y)
+    pyautogui.moveTo(x, y)
+
+
 def move_mouse_at_intervals():
-    """Keep the session active without moving the user's cursor."""
+    """Keep the session active so Windows does not lock during idle."""
     global last_keepalive_time, synthetic_input_until
 
     while not stop_event.is_set():
@@ -159,10 +197,12 @@ def move_mouse_at_intervals():
             and current_time - last_keepalive_time >= idle_time_threshold
             and not is_screen_locked()
         ):
-            # Do not alter cursor position: it can wake the display and disrupt work.
+            # Ignore the synthetic move in activity listeners so the black
+            # overlay is not dismissed and the idle clock is not reset wrongly.
             synthetic_input_until = current_time + 1.0
             try:
-                pyautogui.press('shift')  # Simulate a harmless keypress
+                prevent_system_idle()
+                jiggle_mouse()
             except Exception as ex:
                 print(f"Unable to simulate input: {ex}")
             last_keepalive_time = current_time
