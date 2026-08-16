@@ -1,0 +1,10 @@
+# Python virtual environment
+venv/
+.venv/
+
+# Runtime-generated configuration (created next to mmover.py on first run)
+config.json
+
+# Python caches
+__pycache__/
+*.py[cod]
