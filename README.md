@@ -19,8 +19,16 @@ After launch, the program minimizes to the system tray. To exit, use the **Exit*
 ```powershell
 cd c:\work\Pycharm\auto-mouse-mover
 python -m venv venv
-venv\Scripts\pip install pyautogui pynput pystray pillow psutil pycaw
+venv\Scripts\pip install -r requirements.txt
 ```
+
+The equivalent explicit list is:
+
+```powershell
+venv\Scripts\pip install pyautogui pynput pystray pillow psutil screeninfo pycaw
+```
+
+> **Note.** `screeninfo` is used to detect every connected monitor so the black screen covers **all** of them (including a second, larger, or repositioned monitor). If it is missing, the program still runs but falls back to covering a single display.
 
 > **Note.** To detect Windows screen lock, you can optionally install `pywin32`. Without it, the program will still run, but the "screen locked by the system" check will be unavailable.
 
@@ -37,7 +45,7 @@ On first run, a `config.json` file is automatically created next to the script i
 1. The program tracks real mouse and keyboard activity.
 2. If the user is inactive for longer than `idle_time_threshold` seconds, a keep-alive signal (`Shift`) is sent so the system does not lock or sleep.
 3. While an active, unmuted Windows audio session is detected (for example, a video or an online meeting), the black screen is not shown.
-4. If idle time exceeds `display_protection_threshold` seconds and no media is playing, a black screen is shown over all monitors — this protects the panel from static images.
+4. If idle time exceeds `display_protection_threshold` seconds and no media is playing, a black screen is shown over **every** connected monitor (each display gets its own overlay) — this protects the panel from static images. On multi-monitor setups the whole desktop is covered, not just the primary display.
 5. Any mouse movement or key press dismisses the black screen **only if password protection is disabled**.
 6. If a password is enabled, you must enter it in the form on the black screen and press Enter to unlock.
 

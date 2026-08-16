@@ -251,34 +251,88 @@ def setup_tray():
     icon = Icon("Auto Mouse Mover", icon_image, "Mouse Mover", menu)
     threading.Thread(target=icon.run, daemon=True).start()
 
+def get_monitor_geometries(root):
+    """Return one geometry dict per monitor covering the whole desktop.
+
+    On Windows a single Tk window sized to ``winfo_vrootwidth`` only spans the
+    primary display, so a secondary monitor stayed partly uncovered. Querying
+    every monitor lets us place a dedicated black overlay on each one. Falls
+    back to Tk's virtual-root bounds when monitor enumeration is unavailable.
+    """
+    monitors = []
+    try:
+        from screeninfo import get_monitors
+
+        for monitor in get_monitors():
+            if monitor.width and monitor.height:
+                monitors.append(
+                    {
+                        "x": int(monitor.x),
+                        "y": int(monitor.y),
+                        "width": int(monitor.width),
+                        "height": int(monitor.height),
+                        "is_primary": bool(monitor.is_primary),
+                    }
+                )
+    except Exception as error:
+        # Any failure (missing package, headless server, driver quirk) must not
+        # crash the protector; fall back to the single virtual-desktop overlay.
+        print(f"Unable to enumerate monitors ({error}); using virtual desktop bounds.")
+
+    if not monitors:
+        monitors.append(
+            {
+                "x": root.winfo_vrootx(),
+                "y": root.winfo_vrooty(),
+                "width": root.winfo_vrootwidth(),
+                "height": root.winfo_vrootheight(),
+                "is_primary": True,
+            }
+        )
+    return monitors
+
+
 class ScreenProtector:
-    """Covers all monitors with black while the computer is unattended."""
+    """Covers every monitor with black while the computer is unattended."""
 
     def __init__(self):
         self.root = tk.Tk()
         self.root.withdraw()
-        self.overlay = tk.Toplevel(self.root, bg="black")
-        self.overlay.withdraw()
-        self.overlay.overrideredirect(True)
-        self.overlay.attributes("-topmost", True)
-        self.overlay.configure(cursor="none")
+        self.monitors = get_monitor_geometries(self.root)
+
+        # One full-screen black overlay per monitor. A single window cannot
+        # reliably span every display on Windows, which left secondary monitors
+        # partly visible, so each monitor gets its own dedicated overlay.
+        self.overlays = []
+        for monitor in self.monitors:
+            overlay = tk.Toplevel(self.root, bg="black")
+            overlay.withdraw()
+            overlay.overrideredirect(True)
+            overlay.attributes("-topmost", True)
+            overlay.configure(cursor="none")
+            overlay.monitor = monitor
+            self.overlays.append(overlay)
+
         self.visible = False
         self.password_form_visible = False
         self.password_form_hide_at = 0.0
         self.password_required = self.password_is_configured()
         self.password_var = tk.StringVar()
         self.message_var = tk.StringVar(value="Enter password to unlock")
+        self.form_window = None
 
         if self.password_required:
             self.create_password_form()
             self.bind_unlock_attempt_handlers()
 
-        # Virtual desktop bounds cover every monitor, including monitors left
-        # or above the primary display.
-        self.x = self.root.winfo_vrootx()
-        self.y = self.root.winfo_vrooty()
-        self.width = self.root.winfo_vrootwidth()
-        self.height = self.root.winfo_vrootheight()
+        print(f"Screen protector covering {len(self.overlays)} monitor(s):")
+        for monitor in self.monitors:
+            print(
+                f"  {monitor['width']}x{monitor['height']} at "
+                f"({monitor['x']}, {monitor['y']})"
+                + (" [primary]" if monitor["is_primary"] else "")
+            )
+
         self.root.after(200, self.update)
 
     def password_is_configured(self):
@@ -293,7 +347,15 @@ class ScreenProtector:
             return False
 
     def create_password_form(self):
-        self.password_panel = tk.Frame(self.overlay, bg="black")
+        # The form lives in its own top-level window so it can be centered on
+        # whichever monitor the user is interacting with, instead of being
+        # pinned to one overlay.
+        self.form_window = tk.Toplevel(self.root, bg="black")
+        self.form_window.withdraw()
+        self.form_window.overrideredirect(True)
+        self.form_window.attributes("-topmost", True)
+        self.password_panel = tk.Frame(self.form_window, bg="black")
+        self.password_panel.pack(padx=48, pady=32)
         tk.Label(
             self.password_panel,
             textvariable=self.message_var,
@@ -315,8 +377,9 @@ class ScreenProtector:
 
     def bind_unlock_attempt_handlers(self):
         """Show the password form only after an explicit unlock attempt."""
-        for sequence in ("<KeyPress>", "<Button>", "<Motion>"):
-            self.overlay.bind(sequence, self.on_unlock_attempt, add="+")
+        for overlay in self.overlays:
+            for sequence in ("<KeyPress>", "<Button>", "<Motion>"):
+                overlay.bind(sequence, self.on_unlock_attempt, add="+")
 
     def on_unlock_attempt(self, event=None):
         if self.visible and self.password_required and not self.password_form_visible:
@@ -330,42 +393,82 @@ class ScreenProtector:
         if self.password_form_visible:
             self.extend_password_form_timeout()
 
+    def monitor_under_pointer(self):
+        """Return the monitor holding the cursor, else the primary monitor."""
+        try:
+            pointer_x = self.root.winfo_pointerx()
+            pointer_y = self.root.winfo_pointery()
+        except tk.TclError:
+            pointer_x = pointer_y = None
+
+        if pointer_x is not None:
+            for monitor in self.monitors:
+                if (
+                    monitor["x"] <= pointer_x < monitor["x"] + monitor["width"]
+                    and monitor["y"] <= pointer_y < monitor["y"] + monitor["height"]
+                ):
+                    return monitor
+
+        for monitor in self.monitors:
+            if monitor["is_primary"]:
+                return monitor
+        return self.monitors[0]
+
+    def set_overlay_cursor(self, cursor):
+        for overlay in self.overlays:
+            overlay.configure(cursor=cursor)
+
     def show_password_form(self):
         if self.password_form_visible:
             self.extend_password_form_timeout()
             return
 
-        self.password_panel.place(relx=0.5, rely=0.5, anchor="center")
+        monitor = self.monitor_under_pointer()
+        self.form_window.update_idletasks()
+        form_width = self.form_window.winfo_reqwidth()
+        form_height = self.form_window.winfo_reqheight()
+        form_x = monitor["x"] + (monitor["width"] - form_width) // 2
+        form_y = monitor["y"] + (monitor["height"] - form_height) // 2
+        self.form_window.geometry(f"{form_width}x{form_height}{form_x:+d}{form_y:+d}")
+
         self.password_form_visible = True
         self.password_var.set("")
         self.message_var.set("Enter password to unlock")
-        self.overlay.configure(cursor="")
+        self.set_overlay_cursor("")
+        self.form_window.deiconify()
+        self.form_window.lift()
         self.extend_password_form_timeout()
-        self.overlay.after(50, self.password_entry.focus_force)
+        self.form_window.after(50, self.password_entry.focus_force)
 
     def hide_password_form(self):
         if not self.password_form_visible:
             return
 
-        self.password_panel.place_forget()
+        self.form_window.withdraw()
         self.password_form_visible = False
         self.password_var.set("")
         self.message_var.set("Enter password to unlock")
-        self.overlay.configure(cursor="none")
+        self.set_overlay_cursor("none")
 
     def show(self):
-        self.overlay.geometry(f"{self.width}x{self.height}{self.x:+d}{self.y:+d}")
+        for overlay in self.overlays:
+            monitor = overlay.monitor
+            overlay.geometry(
+                f"{monitor['width']}x{monitor['height']}"
+                f"{monitor['x']:+d}{monitor['y']:+d}"
+            )
+            overlay.deiconify()
+            overlay.lift()
         if self.password_required:
             password_protection_active.set()
             self.hide_password_form()
-        self.overlay.deiconify()
-        self.overlay.lift()
         self.visible = True
 
     def hide(self):
         if self.password_required:
             self.hide_password_form()
-        self.overlay.withdraw()
+        for overlay in self.overlays:
+            overlay.withdraw()
         password_protection_active.clear()
         self.visible = False
 

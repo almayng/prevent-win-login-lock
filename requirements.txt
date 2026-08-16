@@ -1,0 +1,15 @@
+# Cross-platform dependencies (installed on every OS).
+pyautogui==0.9.54
+pynput==1.8.2
+pystray==0.19.5
+pillow==12.3.0
+psutil==7.2.2
+# Enumerates every connected monitor so the screen protector can cover all of
+# them (multi-monitor support). Falls back to a single overlay if unavailable.
+screeninfo==0.8.1
+
+# Windows-only extras.
+# pycaw powers the "pause protection while media plays" feature; pywin32 enables
+# detecting the Windows lock screen. Both are skipped automatically on other OSes.
+pycaw; sys_platform == "win32"
+pywin32; sys_platform == "win32"
