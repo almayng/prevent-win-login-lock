@@ -1,4 +1,0 @@
-{
-  "name": "Auto Mouse Mover",
-  "install": "sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-venv python3-tk python3-dev scrot && python3 -m venv venv && venv/bin/pip install --upgrade pip && venv/bin/pip install -r requirements.txt"
-}
