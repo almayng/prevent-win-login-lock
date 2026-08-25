@@ -1,10 +1,23 @@
+import ctypes
+import sys
+
+# pyautogui calls SetProcessDPIAware() on import and locks the process to the
+# primary DPI. On a mixed-DPI setup that shrinks the second monitor overlay.
+if sys.platform == "win32":
+    try:
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
+    except Exception:
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            pass
+
 import pyautogui
 import threading
 import time
 import tkinter as tk
 import argparse
 import base64
-import ctypes
 import getpass
 import hashlib
 import hmac
@@ -21,6 +34,55 @@ from PIL import Image, ImageDraw
 ES_CONTINUOUS = 0x80000000
 ES_SYSTEM_REQUIRED = 0x00000001
 ES_DISPLAY_REQUIRED = 0x00000002
+INPUT_MOUSE = 0
+MOUSEEVENTF_MOVE = 0x0001
+GWL_EXSTYLE = -20
+GA_ROOT = 2
+WS_EX_NOACTIVATE = 0x08000000
+WS_EX_TOOLWINDOW = 0x00000080
+HWND_TOPMOST = -1
+SWP_NOACTIVATE = 0x0010
+MONITORINFOF_PRIMARY = 1
+PROCESS_PER_MONITOR_DPI_AWARE = 2
+DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+
+
+class _RECT(ctypes.Structure):
+    _fields_ = (
+        ("left", ctypes.c_long),
+        ("top", ctypes.c_long),
+        ("right", ctypes.c_long),
+        ("bottom", ctypes.c_long),
+    )
+
+
+class _MONITORINFOEXW(ctypes.Structure):
+    _fields_ = (
+        ("cbSize", ctypes.c_ulong),
+        ("rcMonitor", _RECT),
+        ("rcWork", _RECT),
+        ("dwFlags", ctypes.c_ulong),
+        ("szDevice", ctypes.c_wchar * 32),
+    )
+
+
+class _MOUSEINPUT(ctypes.Structure):
+    _fields_ = (
+        ("dx", ctypes.c_long),
+        ("dy", ctypes.c_long),
+        ("mouseData", ctypes.c_ulong),
+        ("dwFlags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("dwExtraInfo", ctypes.c_void_p),
+    )
+
+
+class _INPUT(ctypes.Structure):
+    class _INPUTUNION(ctypes.Union):
+        _fields_ = (("mi", _MOUSEINPUT),)
+
+    _anonymous_ = ("_input",)
+    _fields_ = (("type", ctypes.c_ulong), ("_input", _INPUTUNION))
 
 CONFIG_PATH = Path(__file__).with_name("config.json")
 DEFAULT_CONFIG = {
@@ -178,11 +240,26 @@ def prevent_system_idle():
 
 
 def jiggle_mouse():
-    """Tiny cursor nudge that resets the Windows last-input idle timer."""
-    x, y = pyautogui.position()
-    # One-pixel move and back: enough for GetLastInputInfo, invisible in practice.
-    pyautogui.moveTo(x + 1, y)
-    pyautogui.moveTo(x, y)
+    """Reset the Windows last-input timer so messengers stay Available.
+
+    ``pyautogui.moveTo`` uses ``SetCursorPos``, which moves the cursor but does
+    not count as input. ``SendInput`` does, and that is what GetLastInputInfo,
+    the screensaver, and presence status look at.
+    """
+    if not psutil.WINDOWS:
+        x, y = pyautogui.position()
+        pyautogui.moveTo(x + 1, y)
+        pyautogui.moveTo(x, y)
+        return
+
+    events = (_INPUT * 2)()
+    events[0].type = INPUT_MOUSE
+    events[0].mi = _MOUSEINPUT(1, 0, 0, MOUSEEVENTF_MOVE, 0, None)
+    events[1].type = INPUT_MOUSE
+    events[1].mi = _MOUSEINPUT(-1, 0, 0, MOUSEEVENTF_MOVE, 0, None)
+    sent = ctypes.windll.user32.SendInput(2, ctypes.byref(events), ctypes.sizeof(_INPUT))
+    if sent != 2:
+        raise OSError(f"SendInput sent {sent} of 2 mouse events")
 
 
 def move_mouse_at_intervals():
@@ -251,6 +328,57 @@ def setup_tray():
     icon = Icon("Auto Mouse Mover", icon_image, "Mouse Mover", menu)
     threading.Thread(target=icon.run, daemon=True).start()
 
+def enable_per_monitor_dpi():
+    """Use physical pixels so mixed-DPI monitors get exact overlay placement."""
+    if not psutil.WINDOWS:
+        return
+    try:
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(
+            ctypes.c_void_p(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+        )
+        return
+    except Exception:
+        pass
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception as error:
+            print(f"Unable to set DPI awareness: {error}")
+
+
+def list_windows_monitors():
+    """Return monitor rectangles in physical pixels from the Win32 API."""
+    monitors = []
+
+    def callback(hmon, _hdc, _lprect, _lparam):
+        info = _MONITORINFOEXW()
+        info.cbSize = ctypes.sizeof(_MONITORINFOEXW)
+        if ctypes.windll.user32.GetMonitorInfoW(hmon, ctypes.byref(info)):
+            rect = info.rcMonitor
+            monitors.append(
+                {
+                    "x": int(rect.left),
+                    "y": int(rect.top),
+                    "width": int(rect.right - rect.left),
+                    "height": int(rect.bottom - rect.top),
+                    "is_primary": bool(info.dwFlags & MONITORINFOF_PRIMARY),
+                }
+            )
+        return 1
+
+    enum_proc = ctypes.WINFUNCTYPE(
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.POINTER(_RECT),
+        ctypes.c_void_p,
+    )
+    ctypes.windll.user32.EnumDisplayMonitors(0, 0, enum_proc(callback), 0)
+    return [monitor for monitor in monitors if monitor["width"] and monitor["height"]]
+
+
 def get_monitor_geometries(root):
     """Return one geometry dict per monitor covering the whole desktop.
 
@@ -260,24 +388,31 @@ def get_monitor_geometries(root):
     back to Tk's virtual-root bounds when monitor enumeration is unavailable.
     """
     monitors = []
-    try:
-        from screeninfo import get_monitors
+    if psutil.WINDOWS:
+        try:
+            monitors = list_windows_monitors()
+        except Exception as error:
+            print(f"Unable to enumerate monitors via Win32 ({error}).")
 
-        for monitor in get_monitors():
-            if monitor.width and monitor.height:
-                monitors.append(
-                    {
-                        "x": int(monitor.x),
-                        "y": int(monitor.y),
-                        "width": int(monitor.width),
-                        "height": int(monitor.height),
-                        "is_primary": bool(monitor.is_primary),
-                    }
-                )
-    except Exception as error:
-        # Any failure (missing package, headless server, driver quirk) must not
-        # crash the protector; fall back to the single virtual-desktop overlay.
-        print(f"Unable to enumerate monitors ({error}); using virtual desktop bounds.")
+    if not monitors:
+        try:
+            from screeninfo import get_monitors
+
+            for monitor in get_monitors():
+                if monitor.width and monitor.height:
+                    monitors.append(
+                        {
+                            "x": int(monitor.x),
+                            "y": int(monitor.y),
+                            "width": int(monitor.width),
+                            "height": int(monitor.height),
+                            "is_primary": bool(monitor.is_primary),
+                        }
+                    )
+        except Exception as error:
+            # Any failure (missing package, headless server, driver quirk) must not
+            # crash the protector; fall back to the single virtual-desktop overlay.
+            print(f"Unable to enumerate monitors ({error}); using virtual desktop bounds.")
 
     if not monitors:
         monitors.append(
@@ -292,10 +427,80 @@ def get_monitor_geometries(root):
     return monitors
 
 
+def overlay_placement(monitor):
+    """Return x, y, width, height for the protector on this monitor.
+
+    Only the primary display is inset by 1px so Windows 11 does not treat the
+    overlay as a fullscreen app (Do Not Disturb / Zzz). Other monitors keep
+    their exact bounds.
+    """
+    x = int(monitor["x"])
+    y = int(monitor["y"])
+    width = int(monitor["width"])
+    height = int(monitor["height"])
+    if monitor.get("is_primary", True):
+        width = max(1, width - 1)
+        height = max(1, height - 1)
+    return x, y, width, height
+
+
+def overlay_geometry(monitor):
+    x, y, width, height = overlay_placement(monitor)
+    return f"{width}x{height}{x:+d}{y:+d}"
+
+
+def overlay_hwnd(overlay):
+    hwnd = int(overlay.winfo_id())
+    return ctypes.windll.user32.GetAncestor(hwnd, GA_ROOT) or hwnd
+
+
+def suppress_overlay_activation(overlay):
+    """Keep the overlay off the foreground/Alt-Tab fullscreen heuristics."""
+    if not psutil.WINDOWS:
+        return
+    try:
+        overlay.update_idletasks()
+        hwnd = overlay_hwnd(overlay)
+        style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        ctypes.windll.user32.SetWindowLongW(
+            hwnd,
+            GWL_EXSTYLE,
+            style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+        )
+    except Exception as error:
+        print(f"Unable to adjust overlay window style: {error}")
+
+
+def place_overlay(overlay, monitor):
+    """Place the overlay on the monitor using physical Win32 coordinates.
+
+    Tk ``geometry`` cannot reliably position overrideredirect windows on a
+    mixed-DPI secondary display, which left a gap at the top and right.
+    """
+    x, y, width, height = overlay_placement(monitor)
+    overlay.geometry(f"{width}x{height}{x:+d}{y:+d}")
+    if not psutil.WINDOWS:
+        return
+    try:
+        overlay.update_idletasks()
+        ctypes.windll.user32.SetWindowPos(
+            overlay_hwnd(overlay),
+            ctypes.c_void_p(HWND_TOPMOST),
+            x,
+            y,
+            width,
+            height,
+            SWP_NOACTIVATE,
+        )
+    except Exception as error:
+        print(f"Unable to place overlay: {error}")
+
+
 class ScreenProtector:
     """Covers every monitor with black while the computer is unattended."""
 
     def __init__(self):
+        enable_per_monitor_dpi()
         self.root = tk.Tk()
         self.root.withdraw()
         self.monitors = get_monitor_geometries(self.root)
@@ -311,6 +516,7 @@ class ScreenProtector:
             overlay.attributes("-topmost", True)
             overlay.configure(cursor="none")
             overlay.monitor = monitor
+            suppress_overlay_activation(overlay)
             self.overlays.append(overlay)
 
         self.visible = False
@@ -452,13 +658,9 @@ class ScreenProtector:
 
     def show(self):
         for overlay in self.overlays:
-            monitor = overlay.monitor
-            overlay.geometry(
-                f"{monitor['width']}x{monitor['height']}"
-                f"{monitor['x']:+d}{monitor['y']:+d}"
-            )
             overlay.deiconify()
-            overlay.lift()
+            overlay.attributes("-topmost", True)
+            place_overlay(overlay, overlay.monitor)
         if self.password_required:
             password_protection_active.set()
             self.hide_password_form()
@@ -543,6 +745,7 @@ if __name__ == "__main__":
         print(f"Password protection disabled in {CONFIG_PATH}.")
         raise SystemExit()
 
+    enable_per_monitor_dpi()
     idle_time_threshold = float(config["idle_time_threshold"])
     display_protection_threshold = float(config["display_protection_threshold"])
     password_prompt_timeout = float(config["password_prompt_timeout"])
